@@ -4,6 +4,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE TypeSynonymInstances       #-}
+{-# LANGUAGE NoMonadFailDesugaring #-}
 
 module TXMonad.Core
   ( TX
