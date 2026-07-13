@@ -4,7 +4,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE TypeSynonymInstances       #-}
-{-# LANGUAGE NoMonadFailDesugaring #-}
 
 module TXMonad.Core
   ( TX
@@ -41,6 +40,7 @@ where
 
 import           TXMonad.StackSet
 
+import           Control.Monad.Fail
 import           Control.Monad.Reader
 import           Control.Monad.State
 import           Data.Default
@@ -108,7 +108,7 @@ data ScreenDetail = SD
 
 newtype TX a =
   TX (ReaderT TXConf (StateT TXState IO) a)
-  deriving (Functor, Monad, MonadIO, MonadState TXState, MonadReader TXConf)
+  deriving (Functor, Monad, MonadFail, MonadIO, MonadState TXState, MonadReader TXConf)
 
 instance Applicative TX where
   pure  = return
