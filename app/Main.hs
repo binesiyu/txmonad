@@ -1,3 +1,4 @@
+-- | txmonad 应用程序入口点
 module Main
   ( main
   )
