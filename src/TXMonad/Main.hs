@@ -10,7 +10,7 @@ module TXMonad.Main
   )
 where
 
-import           Control.Monad                  ( when )
+import           Control.Monad                  ( forever, when )
 import           Control.Monad.Reader
 import           Control.Monad.State
 

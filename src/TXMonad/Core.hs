@@ -46,6 +46,7 @@ where
 
 import           TXMonad.StackSet
 
+import           Control.Monad                  ( liftM, liftM2, when )
 import           Control.Monad.Fail
 import           Control.Monad.Reader
 import           Control.Monad.State
@@ -154,13 +155,9 @@ data ScreenDetail = SD
 --
 newtype TX a =
   TX (ReaderT TXConf (StateT TXState IO) a)
-  deriving (Functor, Monad, MonadFail, MonadIO, MonadState TXState, MonadReader TXConf)
+  deriving (Functor, Applicative, Monad, MonadFail, MonadIO, MonadState TXState, MonadReader TXConf)
 
--- 注意：'TX' 使用标准 GHC 派生机制获得 'Monad' 实例，
--- 'Applicative' 需要手动定义以确保一致性。
-instance Applicative TX where
-  pure  = return
-  (<*>) = ap
+-- 注意：'TX' 使用标准 GHC 派生机制获得 'Monad' 与 'Applicative' 实例。
 
 -- | 'Semigroup' 实例：通过 'liftM2' 将操作提升到 'TX' monad 中。
 instance Semigroup a => Semigroup (TX a) where
@@ -168,8 +165,7 @@ instance Semigroup a => Semigroup (TX a) where
 
 -- | 'Monoid' 实例：'mempty' 返回 'mempty' 包装后的值。
 instance (Monoid a) => Monoid (TX a) where
-  mempty  = return mempty
-  mappend = liftM2 mappend
+  mempty = return mempty
 
 -- | 'Default' 实例：通过 'def' 获取包装后的默认值。
 instance Default a => Default (TX a) where

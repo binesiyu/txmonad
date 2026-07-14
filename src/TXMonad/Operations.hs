@@ -20,6 +20,7 @@ import           System.Console.ANSI
 import           System.IO
 import qualified Text.Read                     as T
 
+import           Control.Monad                  ( forM )
 import           Control.Monad.Reader
 import           Control.Monad.State
 
