@@ -1,8 +1,10 @@
--- | txmonad 测试入口
-module Main
-  ( main
-  )
-where
+module Main (main) where
+
+import Test.Hspec
+import qualified StackSetSpec
+import qualified LayoutSpec
 
 main :: IO ()
-main = putStrLn "Test suite not yet implemented"
+main = hspec $ do
+  StackSetSpec.spec
+  LayoutSpec.spec
