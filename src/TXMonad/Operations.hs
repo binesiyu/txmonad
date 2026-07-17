@@ -2,18 +2,32 @@
 --
 -- 提供窗口管理操作（添加、删除、聚焦、消息发送）、
 -- 基于 ANSI 终端的可视化渲染，以及屏幕布局更新逻辑。
-module TXMonad.Operations where
+module TXMonad.Operations
+  ( -- * 窗口操作
+    addWindow
+  , deleteWindow
+  , manage
+  , unmanage
+  , windows
+  , sendMessage
+  , withFocused
+    -- * 布局管理
+  , updateLayout
+    -- * 屏幕渲染
+  , printScreen
+    -- * 屏幕工作空间查询
+  , screenWorkspace
+    -- * 用户交互
+  , helpCommand
+  )
+where
 
 import           TXMonad.Core
 import           TXMonad.Layout                 ( Full(..) )
 import qualified TXMonad.StackSet              as W
 
 import           Data.Array
-import           Data.List                      ( find
-                                                , intercalate
-                                                , nub
-                                                , (\\)
-                                                )
+import           Data.List                      ( find )
 import           Data.Maybe
 import           Data.Monoid                    ( Endo(..) )
 import           System.Console.ANSI
@@ -23,6 +37,10 @@ import qualified Text.Read                     as T
 import           Control.Monad                  ( forM )
 import           Control.Monad.Reader
 import           Control.Monad.State
+
+-- =====================================================================
+-- 窗口管理操作
+-- =====================================================================
 
 -- | 添加一个新窗口到当前工作空间。
 --
@@ -52,6 +70,101 @@ unmanage = windows . W.delete
 -- | 对窗口集执行修改操作的便捷函数。
 windows :: (WindowSet -> WindowSet) -> TX ()
 windows = modifyWindowSet
+
+-- | 向当前工作空间的布局发送消息。
+--
+-- 将消息包装为 'SomeMessage' 并传递给当前布局的 'handleMessage'，
+-- 若布局发生变化则更新窗口集。
+sendMessage :: Message a => a -> TX ()
+sendMessage a = do
+  w   <- W.workspace . W.current <$> gets windowset
+  ml' <- handleMessage (W.layout w) (SomeMessage a)
+  whenJust ml' $ \l' -> modifyWindowSet $ \ws -> ws
+    { W.current =
+      (W.current ws) { W.workspace = (W.workspace $ W.current ws)
+                       { W.layout = l'
+                       }
+                     }
+    }
+  return ()
+
+-- | 对当前聚焦的窗口应用 'TX' 操作，若不存在则不执行。
+withFocused :: (Window -> TX ()) -> TX ()
+withFocused f = withWindowSet $ \w -> whenJust (W.peek w) f
+
+-- =====================================================================
+-- 布局管理
+-- =====================================================================
+
+-- | 更新指定工作空间的布局。
+--
+-- 若布局发生变化（@ml@ 非空），在所有工作空间中查找匹配的标签并更新布局。
+updateLayout :: WorkspaceId -> Maybe (Layout Window) -> TX ()
+updateLayout i ml = whenJust ml $ \l -> runOnWorkSpaces
+  $ \ww -> return $ if W.tag ww == i then ww { W.layout = l } else ww
+
+-- =====================================================================
+-- 终端渲染区（字符串生成 → 颜色打印 → 屏幕渲染主函数）
+-- =====================================================================
+
+-- | 渲染并输出完整的屏幕显示。
+--
+-- 这是终端渲染的主函数：遍历所有屏幕计算布局，
+-- 确定聚焦窗口，绘制边框字符，并使用 ANSI 颜色输出。
+printScreen :: TX ()
+printScreen = do
+  TXState { windowset = ws } <- get
+  conf                       <- asks config
+  let allScreens = W.screens ws
+  rects <- forM allScreens $ \w -> do
+    let wsp      = W.workspace w
+        n        = W.tag wsp
+        this     = W.view n ws
+        tiled    = W.stack . W.workspace . W.current $ this
+        viewrect = screenRect $ W.screenDetail w
+    (rs, ml') <- runLayout wsp { W.stack = tiled } viewrect
+    updateLayout n ml'
+    return (rs, w)
+  let fw    = W.peek ws
+      frect = do
+        fwid <- fw
+        snd <$> find ((== fwid) . fst) (fst $ head rects)
+      u   = upBorder conf
+      d   = downBorder conf
+      l   = leftBorder conf
+      r   = rightBorder conf
+      fbc = fromMaybe Red $ T.readMaybe (focusedBorderColor conf)
+      nbc = fromMaybe Blue $ T.readMaybe (normalBorderColor conf)
+  io (setCursorPosition 0 0)
+  io clearScreen
+  io $ printAllWithFocus (fmap (screenString u d l r) rects) frect fbc nbc
+  io inputLine
+
+-- =====================================================================
+-- 用户交互
+-- =====================================================================
+
+-- | 显示帮助信息并等待用户输入。
+helpCommand :: String -> TX ()
+helpCommand s = io $ do
+  setCursorPosition 0 0
+  clearScreen
+  putStrLn s
+  inputLine
+
+-- =====================================================================
+-- 屏幕工作空间查询
+-- =====================================================================
+
+-- | 返回屏幕 'sc' 上可见的工作空间，若不存在则返回 'Nothing'。
+screenWorkspace :: ScreenId -> TX (Maybe WorkspaceId)
+screenWorkspace sc = withWindowSet $ return . W.lookupWorkspace sc
+
+-- =====================================================================
+-- 内部辅助函数（不导出）
+-- =====================================================================
+
+-- 字符串生成辅助 -------------------------------------------------------
 
 -- | 将屏幕转化为字符串表示（头部 + 详细行列表）。
 --
@@ -116,6 +229,8 @@ windowDetail u d l r (ws, Rectangle x y w h)
   right = [ ((x + w - 1, y + i), r) | i <- [1 .. h - 2] ]
   name  = zip [ (x + i, y + 1) | i <- [1 .. w - 2] ] ws
 
+-- 颜色打印辅助 ---------------------------------------------------------
+
 -- | 使用指定颜色执行 IO 操作，并在前后设置/重置 SGR 属性。
 printWithColor :: Color -> IO () -> IO ()
 printWithColor c action = do
@@ -159,13 +274,7 @@ printAllWithFocus (res : allRes) (Just r) fbc nbc = do
   printFocus fbc nbc r res
   printDefault nbc allRes
 
--- | 显示帮助信息并等待用户输入。
-helpCommand :: String -> TX ()
-helpCommand s = io $ do
-  setCursorPosition 0 0
-  clearScreen
-  putStrLn s
-  inputLine
+-- 交互辅助 -------------------------------------------------------------
 
 -- | 显示命令行提示符并刷新输出。
 inputLine :: IO ()
@@ -174,71 +283,8 @@ inputLine = do
   putStr "txmonad> "
   hFlush stdout
 
--- | 渲染并输出完整的屏幕显示。
---
--- 这是终端渲染的主函数：遍历所有屏幕计算布局，
--- 确定聚焦窗口，绘制边框字符，并使用 ANSI 颜色输出。
-printScreen :: TX ()
-printScreen = do
-  TXState { windowset = ws } <- get
-  conf                       <- asks config
-  let allScreens = W.screens ws
-  rects <- forM allScreens $ \w -> do
-    let wsp      = W.workspace w
-        n        = W.tag wsp
-        this     = W.view n ws
-        tiled    = W.stack . W.workspace . W.current $ this
-        viewrect = screenRect $ W.screenDetail w
-    (rs, ml') <- runLayout wsp { W.stack = tiled } viewrect
-    updateLayout n ml'
-    return (rs, w)
-  let fw    = W.peek ws
-      frect = do
-        fwid <- fw
-        snd <$> find ((== fwid) . fst) (fst $ head rects)
-      u   = upBorder conf
-      d   = downBorder conf
-      l   = leftBorder conf
-      r   = rightBorder conf
-      fbc = fromMaybe Red $ T.readMaybe (focusedBorderColor conf)
-      nbc = fromMaybe Blue $ T.readMaybe (normalBorderColor conf)
-  io (setCursorPosition 0 0)
-  io clearScreen
-  io $ printAllWithFocus (fmap (screenString u d l r) rects) frect fbc nbc
-  io inputLine
-
--- | 更新指定工作空间的布局。
---
--- 若布局发生变化（@ml@ 非空），在所有工作空间中查找匹配的标签并更新布局。
-updateLayout :: WorkspaceId -> Maybe (Layout Window) -> TX ()
-updateLayout i ml = whenJust ml $ \l -> runOnWorkSpaces
-  $ \ww -> return $ if W.tag ww == i then ww { W.layout = l } else ww
-
--- | 向当前工作空间的布局发送消息。
---
--- 将消息包装为 'SomeMessage' 并传递给当前布局的 'handleMessage'，
--- 若布局发生变化则更新窗口集。
-sendMessage :: Message a => a -> TX ()
-sendMessage a = do
-  w   <- W.workspace . W.current <$> gets windowset
-  ml' <- handleMessage (W.layout w) (SomeMessage a)
-  whenJust ml' $ \l' -> modifyWindowSet $ \ws -> ws
-    { W.current =
-      (W.current ws) { W.workspace = (W.workspace $ W.current ws)
-                       { W.layout = l'
-                       }
-                     }
-    }
-  return ()
+-- 窗口集操作辅助 -------------------------------------------------------
 
 -- | 通过函数修改窗口集。
 modifyWindowSet :: (WindowSet -> WindowSet) -> TX ()
 modifyWindowSet f = modify $ \xst -> xst { windowset = f (windowset xst) }
-
--- | 返回屏幕 'sc' 上可见的工作空间，若不存在则返回 'Nothing'。
-screenWorkspace :: ScreenId -> TX (Maybe WorkspaceId)
-screenWorkspace sc = withWindowSet $ return . W.lookupWorkspace sc
-
--- | 对当前聚焦的窗口应用 'TX' 操作，若不存在则不执行。
-withFocused :: (Window -> TX ()) -> TX ()
-withFocused f = withWindowSet $ \w -> whenJust (W.peek w) f

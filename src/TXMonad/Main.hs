@@ -6,7 +6,8 @@
 -- 提供 'txmonad' 入口函数、主循环 'launch' 以及
 -- 事件分发逻辑。
 module TXMonad.Main
-  ( txmonad
+  ( -- * 入口函数
+    txmonad
   )
 where
 
@@ -16,10 +17,18 @@ import           Control.Monad.State
 
 import qualified Data.Map                      as M
 import           Data.Monoid                    ( getAll )
-import           TXMonad.Config
+import           TXMonad.Config                 hiding ( handleEventHook
+                                                , keys
+                                                , screenEventHook
+                                                , workspaces
+                                                )
 import           TXMonad.Core
 import           TXMonad.Operations
 import           TXMonad.StackSet               ( new )
+
+-- =====================================================================
+-- 入口函数
+-- =====================================================================
 
 -- | txmonad 的公共入口函数。
 --
@@ -27,6 +36,10 @@ import           TXMonad.StackSet               ( new )
 -- 创建 'TX' monad 环境并启动主循环。
 txmonad :: (LayoutClass l Window, Read (l Window)) => TXConfig l -> IO ()
 txmonad = launch
+
+-- =====================================================================
+-- 内部实现（不导出）
+-- =====================================================================
 
 -- | 启动窗口管理器主循环。
 --

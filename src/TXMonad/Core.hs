@@ -12,34 +12,40 @@
 -- 类型别名、'LayoutClass' 类型类层次，以及可扩展的
 -- 'Message' 布局通信机制。
 module TXMonad.Core
-  ( TX
+  ( -- * 核心数据类型
+    TXState(..)
+  , TXConf(..)
+  , TXConfig(..)
+  , Rectangle(..)
+  , ScreenId(..)
+  , ScreenDetail(..)
+    -- * 类型别名
   , WindowSet
   , WindowScreen
   , WindowSpace
   , WorkspaceId
   , Window
   , Event
-  , ScreenId(..)
-  , TXState(..)
-  , TXConf(..)
-  , TXConfig(..)
-  , LayoutClass(..)
-  , Layout(..)
-  , Typeable
-  , Message
-  , Rectangle(..)
-  , SomeMessage(..)
-  , LayoutMessages(..)
-  , ScreenDetail(..)
-  , fromMessage
+    -- * TX Monad
+  , TX
   , runTX
   , catchTX
-  , runOnWorkSpaces
   , userCode
   , userCodeDef
+    -- * 布局系统
+  , LayoutClass(..)
+  , Layout(..)
+    -- * 消息系统
+  , Typeable
+  , Message
+  , SomeMessage(..)
+  , LayoutMessages(..)
+  , fromMessage
+    -- * 工具函数
   , whenTX
   , whenJust
   , io
+  , runOnWorkSpaces
   , withWindowSet
   )
 where
@@ -57,6 +63,10 @@ import           Data.Maybe                     ( fromMaybe
                                                 )
 import           Data.Monoid
 import           Data.Typeable
+
+-- =====================================================================
+-- 核心数据类型
+-- =====================================================================
 
 -- | 窗口管理器运行时状态。
 --
@@ -113,6 +123,22 @@ data Rectangle = Rectangle
   , height :: Int  -- ^ 矩形的高度（行数）
   } deriving (Eq, Show, Read)
 
+-- | 屏幕标识符，用整数 newtype 封装。
+--
+-- 派生 'Num'、'Enum'、'Integral' 等实例以方便算术操作。
+newtype ScreenId =
+  S Int
+  deriving (Eq, Ord, Show, Read, Enum, Num, Integral, Real)
+
+-- | 屏幕细节，描述单个屏幕的布局信息。
+data ScreenDetail = SD
+  { screenRect :: Rectangle  -- ^ 该屏幕在工作区域中的位置和大小
+  } deriving (Eq, Show, Read)
+
+-- =====================================================================
+-- 类型别名
+-- =====================================================================
+
 -- | 窗口集的完整类型别名，参数化为具体的 Window 和 ScreenId 类型。
 type WindowSet
   = StackSet WorkspaceId (Layout Window) Window ScreenId ScreenDetail
@@ -133,17 +159,9 @@ type Window = String
 -- | 事件类型，用字符串表示（通常为按键组合）。
 type Event = String
 
--- | 屏幕标识符，用整数 newtype 封装。
---
--- 派生 'Num'、'Enum'、'Integral' 等实例以方便算术操作。
-newtype ScreenId =
-  S Int
-  deriving (Eq, Ord, Show, Read, Enum, Num, Integral, Real)
-
--- | 屏幕细节，描述单个屏幕的布局信息。
-data ScreenDetail = SD
-  { screenRect :: Rectangle  -- ^ 该屏幕在工作区域中的位置和大小
-  } deriving (Eq, Show, Read)
+-- =====================================================================
+-- TX Monad
+-- =====================================================================
 
 -- | 'TX' monad：窗口管理器内部所有操作的载体。
 --
@@ -200,13 +218,9 @@ userCode a = catchTX (Just `liftM` a) (return Nothing)
 userCodeDef :: a -> TX a -> TX a
 userCodeDef defValue a = fromMaybe defValue `liftM` userCode a
 
--- | 存在量化的布局包装类型。
---
--- 使用存在类型擦除具体布局类型，使得不同类型布局可以
--- 存放在同一数据结构中。要求布局类型同时支持 'Read'。
-data Layout a =
-  forall l. (LayoutClass l a, Read (l a)) =>
-            Layout (l a)
+-- =====================================================================
+-- 布局系统
+-- =====================================================================
 
 -- | 布局类：所有布局算法必须实现的类型类。
 --
@@ -260,6 +274,14 @@ class Show (layout a) =>
   description :: layout a -> String
   description = show
 
+-- | 存在量化的布局包装类型。
+--
+-- 使用存在类型擦除具体布局类型，使得不同类型布局可以
+-- 存放在同一数据结构中。要求布局类型同时支持 'Read'。
+data Layout a =
+  forall l. (LayoutClass l a, Read (l a)) =>
+            Layout (l a)
+
 -- | 'Layout' 的 'Show' 实例：委托给内部布局的 'Show' 实现。
 instance Show (Layout a) where
   show (Layout l) = show l
@@ -275,6 +297,10 @@ instance LayoutClass Layout Window where
   emptyLayout (Layout l) r = fmap (fmap Layout) `fmap` emptyLayout l r
   handleMessage (Layout l) = fmap (fmap Layout) . handleMessage l
   description (Layout l) = description l
+
+-- =====================================================================
+-- 消息系统
+-- =====================================================================
 
 -- | 消息类型类：可被布局接收和处理的消息。
 --
@@ -312,6 +338,10 @@ data LayoutMessages
 
 -- | 'LayoutMessages' 消息实例。
 instance Message LayoutMessages
+
+-- =====================================================================
+-- 工具函数
+-- =====================================================================
 
 -- | 条件执行：当 monadic 条件为 'True' 时执行指定操作。
 --

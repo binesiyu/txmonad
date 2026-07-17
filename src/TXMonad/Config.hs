@@ -4,10 +4,19 @@
 -- | txmonad 默认配置模块。
 --
 -- 定义了默认工作空间、默认布局栈、默认按键绑定、
--- 事件钩子以及帮助文本，并实现 'Data.Default.Default'
--- 实例。
+-- 事件钩子以及帮助文本，并提供 'def' 默认配置函数。
 module TXMonad.Config
-  ( Default(..)
+  ( -- * 默认配置
+    def
+    -- * 默认组件
+  , workspaces
+  , layout
+  , keys
+  , handleEventHook
+  , screenEventHook
+    -- * 帮助文本
+  , help
+    -- * 类型重导出
   , Event
   )
 where
@@ -19,7 +28,6 @@ import           TXMonad.Core                  as TXMonad
                                                 , workspaces
                                                 )
 
-import           Data.Default
 import qualified Data.Map                      as M
 import           Data.Monoid
 import           System.Exit
@@ -32,6 +40,38 @@ import qualified TXMonad.Core                  as TXMonad
 import           TXMonad.Layout
 import           TXMonad.Operations
 import qualified TXMonad.StackSet              as W
+
+-- =====================================================================
+-- 默认配置
+-- =====================================================================
+
+-- | 默认配置函数：返回 txmonad 的完整默认配置。
+--
+-- 包含两个屏幕（80x20 和 40x20）、蓝色普通边框、红色聚焦边框、
+-- 以及 Unicode 边框字符。可直接作为 'txmonad' 的参数使用：
+--
+-- @
+-- main = txmonad def
+-- @
+def :: TXConfig (Choose Tall (Choose (Mirror Tall) Full))
+def = TXConfig
+  { TXMonad.workspaces         = workspaces
+  , TXMonad.layoutHook         = layout
+  , TXMonad.keys               = keys
+  , TXMonad.handleEventHook    = handleEventHook
+  , TXMonad.screenEventHook    = screenEventHook
+  , TXMonad.sd = [SD (Rectangle 0 0 80 20), SD (Rectangle 0 0 40 20)]
+  , TXMonad.normalBorderColor  = "Blue"
+  , TXMonad.focusedBorderColor = "Red"
+  , TXMonad.upBorder           = '▄'
+  , TXMonad.downBorder         = '▀'
+  , TXMonad.leftBorder         = '▌'
+  , TXMonad.rightBorder        = '▐'
+  }
+
+-- =====================================================================
+-- 默认配置项
+-- =====================================================================
 
 -- | 默认工作空间列表：1 到 9。
 workspaces :: [WorkspaceId]
@@ -54,6 +94,7 @@ screenEventHook _   = return (All True)
 -- | 默认布局栈：@Tall ||| Mirror Tall ||| Full@。
 --
 -- 初始主区域 1 个窗口，主区域比例 1/2，每次调整 3%。
+layout :: Choose Tall (Choose (Mirror Tall) Full) Window
 layout = tiled ||| Mirror tiled ||| Full
  where
   tiled   = Tall nmaster delta ratio
@@ -70,7 +111,7 @@ layout = tiled ||| Mirror tiled ||| Full
 --   * @j@/@k@：焦点下/上移
 --   * @sj@/@sk@：交换窗口位置
 --   * @,@/@.@：增减主区域窗口数
---   * @h@/@l@：缩放主区域
+--   * @sh@/@l@：缩放主区域
 --   * @m@/@sm@：聚焦/交换 master
 --   * @q@：退出
 --   * @j[1..9]@：切换工作空间
@@ -89,7 +130,7 @@ keys conf =
        , ("sk", windows W.swapUp)
        , ("," , sendMessage (IncMasterN 1))
        , ("." , sendMessage (IncMasterN (-1)))
-       , ("h" , sendMessage Shrink)
+       , ("sh", sendMessage Shrink)
        , ("l" , sendMessage Expand)
        , ("m" , windows W.focusMaster)
        , ("sm", windows W.swapMaster)
@@ -111,27 +152,6 @@ keys conf =
        , (f, m) <- [(W.view, "j"), (W.shift, "sj")]
        ]
 
--- | 'TXConfig' 的 'Default' 实例：提供 txmonad 的默认运行时配置。
---
--- 包含两个屏幕（80x20 和 40x20）、蓝色普通边框、红色聚焦边框、
--- 以及 Unicode 边框字符。
-instance (a ~ Choose Tall (Choose (Mirror Tall) Full)) =>
-         Default (TXConfig a) where
-  def = TXConfig
-    { TXMonad.workspaces         = workspaces
-    , TXMonad.layoutHook         = layout
-    , TXMonad.keys               = keys
-    , TXMonad.handleEventHook    = handleEventHook
-    , TXMonad.screenEventHook    = screenEventHook
-    , TXMonad.sd = [SD (Rectangle 0 0 80 20), SD (Rectangle 0 0 40 20)]
-    , TXMonad.normalBorderColor  = "Blue"
-    , TXMonad.focusedBorderColor = "Red"
-    , TXMonad.upBorder           = '▄'
-    , TXMonad.downBorder         = '▀'
-    , TXMonad.leftBorder         = '▌'
-    , TXMonad.rightBorder        = '▐'
-    }
-
 -- | 默认按键绑定说明文本（帮助信息）。
 help :: String
 help = unlines
@@ -151,7 +171,7 @@ help = unlines
   , "sm       Swap the focused window and the master window"
   , ""
   , "-- resizing the master/slave ratio"
-  , "h        Shrink the master area"
+  , "sh       Shrink the master area"
   , "l        Expand the master area"
   , ""
   , "-- increase or decrease number of windows in the master area"
@@ -160,6 +180,9 @@ help = unlines
   , ""
   , "-- quit, or restart"
   , "q               Quit txmonad"
+  , ""
+  , "-- help"
+  , "h               Show this help message"
   , ""
   , "-- Workspaces & screens"
   , "j[1..9]         切换到工作空间 N"

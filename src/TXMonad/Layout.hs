@@ -7,14 +7,17 @@
 -- 以及用于布局切换和缩放的 'ChangeLayout'、'Resize'、'IncMasterN'
 -- 等消息类型。
 module TXMonad.Layout
-  ( Full(..)
+  ( -- * 布局类型
+    Full(..)
   , Tall(..)
   , Mirror(..)
   , Choose
+    -- * 布局组合
+  , (|||)
+    -- * 布局消息
   , ChangeLayout(..)
   , Resize(..)
   , IncMasterN(..)
-  , (|||)
   )
 where
 
@@ -23,8 +26,13 @@ import           Control.Arrow                  ( second
                                                 )
 import           Control.Monad
 import           Data.Maybe                     ( fromMaybe )
+import           Data.Typeable                  ( Typeable )
 import           TXMonad.Core
 import           TXMonad.StackSet              as W
+
+-- =====================================================================
+-- 消息类型定义
+-- =====================================================================
 
 -- | 主区域缩放消息。
 --
@@ -35,6 +43,8 @@ data Resize
   | Expand  -- ^ 扩大主区域
   deriving (Typeable)
 
+instance Message Resize
+
 -- | 主区域窗口数量调整消息。
 --
 -- 正整数增加主区域窗口数，负整数减少。
@@ -42,9 +52,29 @@ data IncMasterN =
   IncMasterN Int  -- ^ 主区域窗口增减量
   deriving (Typeable)
 
-instance Message Resize
-
 instance Message IncMasterN
+
+-- | 布局切换消息。
+--
+--   * 'FirstLayout'：切换到第一个布局
+--   * 'NextLayout'：切换到下一个布局
+data ChangeLayout
+  = FirstLayout  -- ^ 切换到第一个布局
+  | NextLayout   -- ^ 切换到下一个布局
+  deriving (Eq, Show, Typeable)
+
+instance Message ChangeLayout
+
+-- | 内部消息：切换到下一个布局（不包裹）。
+data NextNoWrap =
+  NextNoWrap
+  deriving (Eq, Show, Typeable)
+
+instance Message NextNoWrap
+
+-- =====================================================================
+-- Full 布局
+-- =====================================================================
 
 -- | Full 布局：单窗口全屏显示。
 --
@@ -55,6 +85,10 @@ data Full a =
 
 -- | 'Full' 使用默认 'LayoutClass' 实现（所有窗口全屏）。
 instance LayoutClass Full a
+
+-- =====================================================================
+-- Tall 布局
+-- =====================================================================
 
 -- | Tall 布局：主区域 + 从区域的垂直分割布局。
 --
@@ -85,42 +119,9 @@ instance LayoutClass Tall a where
     resize Expand = Tall nmaster delta (min 1 $ frac + delta)
     incmastern (IncMasterN d) = Tall (max 0 (nmaster + d)) delta frac
 
--- | Tall 布局的核心平铺算法。
---
--- 将 @n@ 个窗口分配到给定的矩形区域 @r@ 中：
---   前 @nmaster@ 个窗口在主区域（垂直分割），
---   其余在从区域（水平分割），主区域占比为 @f@。
-tile :: Rational -> Rectangle -> Int -> Int -> [Rectangle]
-tile f r nmaster n = if n <= nmaster || nmaster == 0
-  then splitVertically n r
-  else splitVertically nmaster r1 ++ splitVertically (n - nmaster) r2
-  where (r1, r2) = splitHorizontallyBy f r
-
--- | 将矩形垂直分割为 /n/ 个等高的子矩形。
-splitVertically, splitHorizontally :: Int -> Rectangle -> [Rectangle]
-splitVertically n r | n < 2 = [r]
-splitVertically n (Rectangle sx sy sw sh) =
-  Rectangle sx sy sw smallh
-    : splitVertically (n - 1) (Rectangle sx (sy + smallh) sw (sh - smallh))
-  where smallh = sh `div` n
-
--- | 将矩形水平分割为 /n/ 个等宽的子矩形（通过镜像实现）。
-splitHorizontally n = map mirrorRect . splitVertically n . mirrorRect
-
--- | 按比例水平分割矩形。
-splitHorizontallyBy, splitVerticallyBy
-  :: RealFrac r => r -> Rectangle -> (Rectangle, Rectangle)
-splitHorizontallyBy f (Rectangle sx sy sw sh) =
-  (Rectangle sx sy leftw sh, Rectangle (sx + leftw) sy (sw - leftw) sh)
-  where leftw = floor $ fromIntegral sw * f
-
--- | 按比例垂直分割矩形（通过镜像实现）。
-splitVerticallyBy f =
-  (mirrorRect *** mirrorRect) . splitHorizontallyBy f . mirrorRect
-
--- | 交换矩形的宽和高（用于 Mirror 布局实现）。
-mirrorRect :: Rectangle -> Rectangle
-mirrorRect (Rectangle rx ry rw rh) = Rectangle ry rx rh rw
+-- =====================================================================
+-- Mirror 布局
+-- =====================================================================
 
 -- | 镜像布局包装器：将内部布局旋转 90 度。
 --
@@ -139,13 +140,9 @@ instance LayoutClass l a => LayoutClass (Mirror l) a where
   handleMessage (Mirror l) = fmap (fmap Mirror) . handleMessage l
   description (Mirror l) = "Mirror " ++ description l
 
--- | 布局组合运算符：将两个布局串联为 'Choose'。
---
--- 初始状态选择左侧布局。用法示例：@Tall ||| Full@。
-(|||) :: l a -> r a -> Choose l r a
-(|||) = Choose L
-
-infixr 5 |||
+-- =====================================================================
+-- Choose 组合布局
+-- =====================================================================
 
 -- | 布局选择：在左右两个布局之间切换的组合布局。
 --
@@ -162,23 +159,13 @@ data LR
   | R  -- ^ 右侧
   deriving (Read, Show, Eq)
 
--- | 布局切换消息。
+-- | 布局组合运算符：将两个布局串联为 'Choose'。
 --
---   * 'FirstLayout'：切换到第一个布局
---   * 'NextLayout'：切换到下一个布局
-data ChangeLayout
-  = FirstLayout  -- ^ 切换到第一个布局
-  | NextLayout   -- ^ 切换到下一个布局
-  deriving (Eq, Show, Typeable)
+-- 初始状态选择左侧布局。用法示例：@Tall ||| Full@。
+(|||) :: l a -> r a -> Choose l r a
+(|||) = Choose L
 
-instance Message ChangeLayout
-
--- | 内部消息：切换到下一个布局（不包裹）。
-data NextNoWrap =
-  NextNoWrap
-  deriving (Eq, Show, Typeable)
-
-instance Message NextNoWrap
+infixr 5 |||
 
 -- | 向布局发送消息的便捷函数。
 handle :: (LayoutClass l a, Message m) => l a -> m -> TX (Maybe (l a))
@@ -244,3 +231,45 @@ instance (LayoutClass l a, LayoutClass r a) => LayoutClass (Choose l r) a where
       L -> return Nothing
       R -> handleMessage r m
     choose c d ml' mr'
+
+-- =====================================================================
+-- 内部几何辅助函数（不导出）
+-- =====================================================================
+
+-- | Tall 布局的核心平铺算法。
+--
+-- 将 @n@ 个窗口分配到给定的矩形区域 @r@ 中：
+--   前 @nmaster@ 个窗口在主区域（垂直分割），
+--   其余在从区域（水平分割），主区域占比为 @f@。
+tile :: Rational -> Rectangle -> Int -> Int -> [Rectangle]
+tile f r nmaster n = if n <= nmaster || nmaster == 0
+  then splitVertically n r
+  else splitVertically nmaster r1 ++ splitVertically (n - nmaster) r2
+  where (r1, r2) = splitHorizontallyBy f r
+
+-- | 将矩形垂直分割为 /n/ 个等高的子矩形。
+splitVertically :: Int -> Rectangle -> [Rectangle]
+splitVertically n r | n < 2 = [r]
+splitVertically n (Rectangle sx sy sw sh) =
+  Rectangle sx sy sw smallh
+    : splitVertically (n - 1) (Rectangle sx (sy + smallh) sw (sh - smallh))
+  where smallh = sh `div` n
+
+-- | 将矩形水平分割为 /n/ 个等宽的子矩形（通过镜像实现）。
+splitHorizontally :: Int -> Rectangle -> [Rectangle]
+splitHorizontally n = map mirrorRect . splitVertically n . mirrorRect
+
+-- | 按比例水平分割矩形。
+splitHorizontallyBy :: RealFrac r => r -> Rectangle -> (Rectangle, Rectangle)
+splitHorizontallyBy f (Rectangle sx sy sw sh) =
+  (Rectangle sx sy leftw sh, Rectangle (sx + leftw) sy (sw - leftw) sh)
+  where leftw = floor $ fromIntegral sw * f
+
+-- | 按比例垂直分割矩形（通过镜像实现）。
+splitVerticallyBy :: RealFrac r => r -> Rectangle -> (Rectangle, Rectangle)
+splitVerticallyBy f =
+  (mirrorRect *** mirrorRect) . splitHorizontallyBy f . mirrorRect
+
+-- | 交换矩形的宽和高（用于 Mirror 布局实现）。
+mirrorRect :: Rectangle -> Rectangle
+mirrorRect (Rectangle rx ry rw rh) = Rectangle ry rx rh rw
